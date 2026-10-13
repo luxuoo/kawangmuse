@@ -29,20 +29,26 @@ app.use(helmet({
 app.use(cors());
 app.use(express.json({ limit: '32kb' }));
 
-// 首页：服务端直出商品数据，避免浏览器拦截 JS 请求导致空白
+// 首页：服务端直出商品 HTML，避免浏览器 JS 被拦截导致空白
 app.get('/', async (req, res) => {
   res.setHeader('Cache-Control', 'no-store');
+  const escHtml = s => String(s == null ? '' : s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
   try {
     const products = await apiClient.getProducts();
-    const list = (products || [])
-      .filter(p => p.inStock !== false)
-      .map(p => ({
-        id: String(p.id),
-        name: p.name,
-        salePrice: orderService.salePriceOf(p)
-      }));
+    const list = (products || []).filter(p => p.inStock !== false);
     let html = fs.readFileSync(path.join(__dirname, '../public/index.html'), 'utf8');
-    html = html.replace('/*__PRODUCTS_JSON__*/', JSON.stringify(list).replace(/</g, '\\u003c'));
+    const productsHtml = list.length
+      ? list.map(p => {
+          const sale = orderService.salePriceOf(p).toFixed(2);
+          return `<div class="product"><div><div class="pname">${escHtml(p.name)}</div>` +
+            `<div class="pprice">${sale} USDT</div></div>` +
+            `<button class="btn" onclick="buy('${String(p.id)}')">购买</button></div>`;
+        }).join('')
+      : '<p class="hint">暂无商品</p>';
+    html = html.replace('<div id="products"><p class="hint">加载中…</p></div>', `<div id="products">${productsHtml}</div>`);
+    // 同时注入 JSON 供 JS 复用
+    const jsonList = list.map(p => ({ id: String(p.id), name: p.name, salePrice: orderService.salePriceOf(p) }));
+    html = html.replace('/*__PRODUCTS_JSON__*/', JSON.stringify(jsonList).replace(/</g, '\\u003c'));
     res.send(html);
   } catch (e) {
     res.sendFile(path.join(__dirname, '../public/index.html'));
