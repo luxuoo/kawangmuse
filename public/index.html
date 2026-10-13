@@ -40,7 +40,7 @@
 </style>
 </head>
 <body>
-<header>自动发货 <span style="font-size:12px;font-weight:400;color:#aaa">BSC · USDT</span></header>
+<div id="jstest" style="text-align:center;color:#f00;font-size:12px">JS未运行</div><header>自动发货 <span style="font-size:12px;font-weight:400;color:#aaa">BSC · USDT</span></header>
 <div class="wrap">
 
   <div class="card" id="step1">
@@ -178,8 +178,9 @@ function startPoll() {
   go(); pollTimer = setInterval(go, 5000);
 }
 
+document.getElementById('jstest').innerText='JS运行中 v2.0.6';
 load();
 </script>
-<footer style="text-align:center;color:#ccc;font-size:11px;padding:16px">v2.0.5</footer>
+<footer style="text-align:center;color:#ccc;font-size:11px;padding:16px">v2.0.6</footer>
 </body>
 </html>
