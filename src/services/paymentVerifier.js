@@ -2,10 +2,14 @@
  * BSC 链上付款核验（只读，不需要钱包私钥）
  *
  * 核验用户提交的交易哈希：
- *  1. 交易存在且执行成功
+ *  1. 交易存在且已上链
  *  2. 包含一笔 USDT Transfer：收款方 = 本店钱包，金额 = 订单应付金额（精确到 6 位小数）
+ *     （交易失败时链上不会留下 Transfer 日志，因此日志存在即代表转账成功）
  *  3. 确认数达到要求
  *  4. 交易时间落在订单有效期内
+ *
+ * 说明：使用 getTransaction + getLogs 而非 getTransactionReceipt，
+ * 因为部分免费 RPC（如 publicnode）把 eth_getTransactionReceipt 划为存档接口。
  */
 
 const { ethers } = require('ethers');
@@ -22,16 +26,19 @@ class PaymentVerifier {
   }
 
   /**
-   * 从回执中找出匹配的 USDT 转账（纯函数，便于测试）
-   * @param {object} receipt 交易回执
+   * 从日志列表中找出匹配的 USDT 转账（纯函数，便于测试）
+   * @param {Array} logs 日志数组（receipt.logs 或 getLogs 返回）
+   * @param {string} txHash 目标交易哈希（用于过滤）
    * @param {string} walletAddress 收款地址
    * @param {bigint} expectedWei 应付金额（wei，USDT 18 位小数）
    * @returns {boolean}
    */
-  findMatchingTransfer(receipt, walletAddress, expectedWei) {
-    if (!receipt || !Array.isArray(receipt.logs)) return false;
+  findMatchingTransfer(logs, txHash, walletAddress, expectedWei) {
+    if (!Array.isArray(logs)) return false;
     const wallet = walletAddress.toLowerCase();
-    for (const log of receipt.logs) {
+    const hash = txHash.toLowerCase();
+    for (const log of logs) {
+      if (!log.transactionHash || log.transactionHash.toLowerCase() !== hash) continue;
       if (!log.address || log.address.toLowerCase() !== this.usdt) continue;
       if (!log.topics || !log.topics[0] || log.topics[0].toLowerCase() !== TRANSFER_TOPIC) continue;
       if (!log.topics[2]) continue;
@@ -53,17 +60,17 @@ class PaymentVerifier {
    * @returns {Promise<{ok:boolean, reason?:string, confirmations?:number, retryable?:boolean}>}
    */
   async verify(txHash, { walletAddress, expectedAmount, createdAt, expiresAt }) {
-    let receipt;
+    let tx;
     try {
-      receipt = await this.provider.getTransactionReceipt(txHash);
+      tx = await this.provider.getTransaction(txHash);
     } catch (e) {
       return { ok: false, reason: '链上查询失败，请稍后重试：' + e.message };
     }
-    if (!receipt) {
+    if (!tx) {
       return { ok: false, reason: '未找到该交易，请确认哈希无误且交易已上链', retryable: true };
     }
-    if (Number(receipt.status) !== 1) {
-      return { ok: false, reason: '该交易在链上执行失败' };
+    if (tx.blockNumber == null) {
+      return { ok: false, reason: '交易尚未打包上链，请稍后重新点击验证', retryable: true };
     }
 
     let expectedWei;
@@ -73,7 +80,18 @@ class PaymentVerifier {
       return { ok: false, reason: '订单金额异常，请联系客服' };
     }
 
-    if (!this.findMatchingTransfer(receipt, walletAddress, expectedWei)) {
+    let logs;
+    try {
+      logs = await this.provider.getLogs({
+        fromBlock: tx.blockNumber,
+        toBlock: tx.blockNumber,
+        address: this.usdt
+      });
+    } catch (e) {
+      return { ok: false, reason: '链上查询失败，请稍后重试：' + e.message };
+    }
+
+    if (!this.findMatchingTransfer(logs, txHash, walletAddress, expectedWei)) {
       return {
         ok: false,
         reason: `未在该交易中找到向 ${walletAddress} 的 ${expectedAmount} USDT 转账，请确认金额精确一致（含尾数）`
@@ -81,7 +99,7 @@ class PaymentVerifier {
     }
 
     const currentBlock = await this.provider.getBlockNumber();
-    const confirmations = currentBlock - receipt.blockNumber;
+    const confirmations = currentBlock - tx.blockNumber;
     if (confirmations < this.requiredConfirmations) {
       return {
         ok: false,
@@ -91,7 +109,7 @@ class PaymentVerifier {
       };
     }
 
-    const block = await this.provider.getBlock(receipt.blockNumber);
+    const block = await this.provider.getBlock(tx.blockNumber);
     const txTime = block.timestamp * 1000;
     if (txTime < createdAt.getTime() - 60000) {
       return { ok: false, reason: '该交易时间早于订单创建时间' };
