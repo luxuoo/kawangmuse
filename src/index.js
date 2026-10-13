@@ -9,9 +9,11 @@ const mongoose = require('mongoose');
 const cors = require('cors');
 const helmet = require('helmet');
 const path = require('path');
+const fs = require('fs');
 
 const apiRoutes = require('./routes/api');
 const orderService = require('./services/orderService');
+const apiClient = require('./services/apiClient');
 
 const app = express();
 
@@ -26,6 +28,27 @@ app.use(helmet({
 }));
 app.use(cors());
 app.use(express.json({ limit: '32kb' }));
+
+// 首页：服务端直出商品数据，避免浏览器拦截 JS 请求导致空白
+app.get('/', async (req, res) => {
+  res.setHeader('Cache-Control', 'no-store');
+  try {
+    const products = await apiClient.getProducts();
+    const list = (products || [])
+      .filter(p => p.inStock !== false)
+      .map(p => ({
+        id: String(p.id),
+        name: p.name,
+        salePrice: orderService.salePriceOf(p)
+      }));
+    let html = fs.readFileSync(path.join(__dirname, '../public/index.html'), 'utf8');
+    html = html.replace('/*__PRODUCTS_JSON__*/', JSON.stringify(list).replace(/</g, '\\u003c'));
+    res.send(html);
+  } catch (e) {
+    res.sendFile(path.join(__dirname, '../public/index.html'));
+  }
+});
+
 app.use(express.static(path.join(__dirname, '../public'), {
   setHeaders(res, filePath) {
     // HTML 永不缓存，确保用户拿到最新页面
