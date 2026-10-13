@@ -85,16 +85,24 @@ function copyText(id) {
 }
 
 async function load() {
-  const r = await api('/products');
   const box = document.getElementById('products');
-  if (!r.success) { box.innerHTML = '<p class="hint">商品加载失败：' + r.error + '</p>'; return; }
-  const list = r.data.filter(p => p.inStock !== false);
-  if (!list.length) { box.innerHTML = '<p class="hint">暂无商品</p>'; return; }
-  box.innerHTML = list.map(p =>
-    '<div class="product"><div><div class="pname">' + esc(p.name) + '</div>' +
-    '<div class="pprice">' + p.salePrice.toFixed(2) + ' USDT</div></div>' +
-    '<button class="btn" onclick="buy(\'' + p.id + '\')">购买</button></div>'
-  ).join('');
+  const ctrl = new AbortController();
+  const timer = setTimeout(() => ctrl.abort(), 15000);
+  try {
+    const r = await api('/products', { signal: ctrl.signal });
+    clearTimeout(timer);
+    if (!r.success) { box.innerHTML = '<p class="hint">商品加载失败：' + esc(r.error) + ' <button class="btn" onclick="load()">重试</button></p>'; return; }
+    const list = r.data.filter(p => p.inStock !== false);
+    if (!list.length) { box.innerHTML = '<p class="hint">暂无商品</p>'; return; }
+    box.innerHTML = list.map(p =>
+      '<div class="product"><div><div class="pname">' + esc(p.name) + '</div>' +
+      '<div class="pprice">' + p.salePrice.toFixed(2) + ' USDT</div></div>' +
+      '<button class="btn" onclick="buy(\'' + p.id + '\')">购买</button></div>'
+    ).join('');
+  } catch (e) {
+    clearTimeout(timer);
+    box.innerHTML = '<p class="hint">网络请求失败，请检查网络后 <button class="btn" onclick="load()">重试</button></p>';
+  }
 }
 
 function esc(s) { return String(s == null ? '' : s).replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c])); }
