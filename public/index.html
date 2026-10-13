@@ -1,0 +1,168 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>自动发货 - BSC USDT 支付</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { font-family: -apple-system, "PingFang SC", "Microsoft YaHei", sans-serif; background: #f5f6f8; color: #222; padding-bottom: 40px; }
+  header { background: #111; color: #fff; padding: 16px; text-align: center; font-size: 18px; font-weight: 600; }
+  .wrap { max-width: 640px; margin: 0 auto; padding: 16px; }
+  .card { background: #fff; border-radius: 12px; padding: 16px; margin-bottom: 12px; box-shadow: 0 1px 4px rgba(0,0,0,.06); }
+  .product { display: flex; justify-content: space-between; align-items: center; padding: 12px 0; border-bottom: 1px solid #eee; }
+  .product:last-child { border-bottom: none; }
+  .pname { font-size: 15px; font-weight: 500; }
+  .pprice { color: #e6432e; font-weight: 700; margin-top: 4px; }
+  .btn { display: inline-block; background: #111; color: #fff; border: none; border-radius: 8px; padding: 10px 18px; font-size: 15px; cursor: pointer; }
+  .btn:disabled { background: #bbb; cursor: not-allowed; }
+  .btn.block { display: block; width: 100%; margin-top: 12px; }
+  .row { display: flex; justify-content: space-between; padding: 8px 0; font-size: 14px; border-bottom: 1px dashed #eee; }
+  .row:last-child { border-bottom: none; }
+  .mono { font-family: ui-monospace, monospace; word-break: break-all; }
+  .amount { font-size: 26px; font-weight: 800; color: #e6432e; }
+  .copy { background: #eee; border: none; border-radius: 6px; padding: 4px 10px; font-size: 12px; cursor: pointer; margin-left: 8px; }
+  input[type=text], input[type=number] { width: 100%; padding: 10px; border: 1px solid #ddd; border-radius: 8px; font-size: 14px; margin-top: 8px; }
+  .countdown { color: #e6432e; font-weight: 700; }
+  .status { padding: 10px; border-radius: 8px; font-size: 14px; margin-top: 10px; text-align: center; }
+  .st-pending { background: #fff7e6; color: #b7791f; }
+  .st-verifying, .st-paid, .st-purchasing { background: #e6f4ff; color: #1668dc; }
+  .st-delivered { background: #e6f9ec; color: #1a7f37; }
+  .st-failed, .st-expired { background: #fdecec; color: #d03030; }
+  .keys { background: #f6f8fa; border: 1px solid #e1e4e8; border-radius: 8px; padding: 10px; margin-top: 8px; }
+  .key { padding: 8px; border-bottom: 1px solid #e1e4e8; font-size: 13px; display: flex; justify-content: space-between; align-items: center; gap: 8px; }
+  .key:last-child { border-bottom: none; }
+  .hint { font-size: 12px; color: #888; margin-top: 8px; line-height: 1.6; }
+  .hidden { display: none; }
+  .steps { display: flex; font-size: 12px; color: #888; margin: 12px 0; }
+  .steps div { flex: 1; text-align: center; }
+  .steps .on { color: #111; font-weight: 700; }
+</style>
+</head>
+<body>
+<header>自动发货 <span style="font-size:12px;font-weight:400;color:#aaa">BSC · USDT</span></header>
+<div class="wrap">
+
+  <div class="card" id="step1">
+    <h3>① 选择商品</h3>
+    <div id="products"><p class="hint">加载中…</p></div>
+  </div>
+
+  <div class="card hidden" id="step2">
+    <h3>② 付款 <span class="countdown" id="countdown"></span></h3>
+    <div class="steps"><div class="on">下单</div><div>→</div><div class="on">付款</div><div>→</div><div>验证</div><div>→</div><div>发货</div></div>
+    <div class="row"><span>商品</span><span id="o-name"></span></div>
+    <div class="row"><span>数量</span><span id="o-qty"></span></div>
+    <div class="row"><span>商品售价</span><span id="o-base"></span></div>
+    <div class="row"><span>识别码（尾数）</span><span class="mono" id="o-suffix"></span></div>
+    <div class="row"><span>实付金额</span><span class="amount" id="o-amount"></span></div>
+    <div class="row"><span>收款地址（BSC）</span><span><span class="mono" id="o-wallet" style="font-size:12px"></span><button class="copy" onclick="copyText('o-wallet')">复制</button></span></div>
+    <p class="hint">请使用 BSC 网络转账 <b>精确金额</b> 的 USDT 到以上地址（含尾数，多一分少一分都识别不了）。付款后把交易哈希填到下面点验证。</p>
+    <input type="text" id="txhash" placeholder="粘贴 BSC 交易哈希（0x…64位）">
+    <button class="btn block" id="verifyBtn" onclick="verify()">提交验证</button>
+    <div id="verifyMsg" class="hint"></div>
+  </div>
+
+  <div class="card hidden" id="step3">
+    <h3>③ 订单状态</h3>
+    <div id="statusBox" class="status st-pending">等待付款…</div>
+    <div id="keysBox" class="hidden">
+      <p style="margin-top:10px;font-weight:600">发货内容（请妥善保存）：</p>
+      <div class="keys" id="keys"></div>
+    </div>
+    <p class="hint" id="orderHint"></p>
+  </div>
+
+</div>
+
+<script>
+const api = (p, opt) => fetch('/api' + p, opt).then(r => r.json());
+let orderId = null, pollTimer = null, expireAt = 0;
+
+function copyText(id) {
+  const t = document.getElementById(id).innerText;
+  navigator.clipboard.writeText(t).then(() => alert('已复制'));
+}
+
+async function load() {
+  const r = await api('/products');
+  const box = document.getElementById('products');
+  if (!r.success) { box.innerHTML = '<p class="hint">商品加载失败：' + r.error + '</p>'; return; }
+  const list = r.data.filter(p => p.inStock !== false);
+  if (!list.length) { box.innerHTML = '<p class="hint">暂无商品</p>'; return; }
+  box.innerHTML = list.map(p =>
+    '<div class="product"><div><div class="pname">' + esc(p.name) + '</div>' +
+    '<div class="pprice">' + p.salePrice.toFixed(2) + ' USDT</div></div>' +
+    '<button class="btn" onclick="buy(\'' + p.id + '\')">购买</button></div>'
+  ).join('');
+}
+
+function esc(s) { return String(s == null ? '' : s).replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c])); }
+
+async function buy(productId) {
+  const qty = parseInt(prompt('购买数量（1~100）', '1') || '1', 10);
+  if (!(qty >= 1 && qty <= 100)) return;
+  const r = await api('/orders', { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify({ productId, quantity: qty }) });
+  if (!r.success) { alert('下单失败：' + r.error); return; }
+  const o = r.data;
+  orderId = o.id; expireAt = new Date(o.expiresAt).getTime();
+  document.getElementById('o-name').innerText = o.productName || o.productId;
+  document.getElementById('o-qty').innerText = o.quantity;
+  document.getElementById('o-base').innerText = (o.unitPrice * o.quantity).toFixed(2) + ' USDT';
+  document.getElementById('o-suffix').innerText = '+' + (o.suffixMicros / 1e6).toFixed(6);
+  document.getElementById('o-amount').innerHTML = o.expectedAmount + ' <button class="copy" onclick="copyText(\'o-amount\')">复制</button>';
+  document.getElementById('o-wallet').innerText = o.walletAddress;
+  document.getElementById('step2').classList.remove('hidden');
+  document.getElementById('step3').classList.remove('hidden');
+  document.getElementById('step2').scrollIntoView({behavior:'smooth'});
+  tick(); setInterval(tick, 1000);
+  startPoll();
+}
+
+function tick() {
+  const left = Math.max(0, expireAt - Date.now());
+  const m = Math.floor(left / 60000), s = Math.floor(left % 60000 / 1000);
+  document.getElementById('countdown').innerText = left > 0 ? '剩余 ' + m + ':' + String(s).padStart(2,'0') : '已过期';
+}
+
+async function verify() {
+  const h = document.getElementById('txhash').value.trim();
+  const msg = document.getElementById('verifyMsg');
+  const btn = document.getElementById('verifyBtn');
+  btn.disabled = true; msg.innerText = '链上核验中…';
+  try {
+    const r = await api('/orders/' + orderId + '/verify', { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify({ txHash: h }) });
+    if (r.success) { msg.innerText = '付款确认成功，正在自动采购发货…'; startPoll(); }
+    else { msg.innerText = '验证失败：' + r.error; }
+  } catch (e) { msg.innerText = '请求失败：' + e.message; }
+  btn.disabled = false;
+}
+
+const STATUS_TEXT = { pending:'等待付款…', verifying:'链上验证中…', paid:'已支付，采购中…', purchasing:'正在从供应商采购…', delivered:'已发货', failed:'失败', expired:'已过期' };
+function startPoll() {
+  if (pollTimer) clearInterval(pollTimer);
+  const go = async () => {
+    const r = await api('/orders/' + orderId);
+    if (!r.success) return;
+    const o = r.data;
+    const box = document.getElementById('statusBox');
+    box.className = 'status st-' + o.status;
+    box.innerText = STATUS_TEXT[o.status] || o.status;
+    if (o.errorMessage) box.innerText += '（' + o.errorMessage + '）';
+    if (o.status === 'delivered' && o.deliveredKeys.length) {
+      document.getElementById('keysBox').classList.remove('hidden');
+      document.getElementById('keys').innerHTML = o.deliveredKeys.map(k =>
+        '<div class="key"><span class="mono">' + esc(k) + '</span><button class="copy" onclick="navigator.clipboard.writeText(' + JSON.stringify(k) + ').then(()=>alert(\'已复制\'))">复制</button></div>'
+      ).join('');
+      clearInterval(pollTimer);
+    }
+    if (['failed','expired'].includes(o.status)) clearInterval(pollTimer);
+    document.getElementById('orderHint').innerText = '订单号：' + o.id;
+  };
+  go(); pollTimer = setInterval(go, 5000);
+}
+
+load();
+</script>
+</body>
+</html>
