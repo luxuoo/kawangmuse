@@ -101,7 +101,7 @@ async function load() {
     ).join('');
   } catch (e) {
     clearTimeout(timer);
-    box.innerHTML = '<p class="hint">网络请求失败，请检查网络后 <button class="btn" onclick="load()">重试</button></p>';
+    box.innerHTML = '<p class="hint">加载失败（' + esc(e.name + ': ' + e.message) + '）<button class="btn" onclick="load()">重试</button></p>';
   }
 }
 
@@ -172,6 +172,6 @@ function startPoll() {
 
 load();
 </script>
-<footer style="text-align:center;color:#ccc;font-size:11px;padding:16px">v2.0.1</footer>
+<footer style="text-align:center;color:#ccc;font-size:11px;padding:16px">v2.0.2</footer>
 </body>
 </html>
