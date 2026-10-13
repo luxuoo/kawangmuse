@@ -18,7 +18,12 @@ const app = express();
 app.use(helmet());
 app.use(cors());
 app.use(express.json({ limit: '32kb' }));
-app.use(express.static(path.join(__dirname, '../public')));
+app.use(express.static(path.join(__dirname, '../public'), {
+  setHeaders(res, filePath) {
+    // HTML 永不缓存，确保用户拿到最新页面
+    if (filePath.endsWith('.html')) res.setHeader('Cache-Control', 'no-store');
+  }
+}));
 
 app.use('/api', apiRoutes);
 
