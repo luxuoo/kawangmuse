@@ -39,7 +39,7 @@ npm start
 |---|---|
 | `WALLET_ADDRESS` | BSC 收款地址（公钥即可） |
 | `BSC_RPC_URL` | BSC 公共 RPC，默认 `https://bsc-dataseed.binance.org` |
-| `USDT_CONTRACT_ADDRESS` | BSC USDT：`0x55d398326f99059f775485246999027b3197955` |
+| `USDT_CONTRACT_ADDRESS` | BSC USDT：`0x55d398326f99059ff775485246999027b3197955` |
 | `PRODSELLER_API_KEY` | ProdSeller API Key |
 | `MARKUP_RATE` | 加价率，`0.3` = 30% |
 | `ORDER_EXPIRE_MINUTES` | 订单有效期（分钟），默认 30 |
